@@ -7,6 +7,7 @@ import pickle
 import copy
 import numpy as np
 import math
+import shutil
 from modeling.blocks import MaskMambaBlock, MaskMambaBlock_DBM
 
 from eval import segment_bars_with_confidence
@@ -19,8 +20,9 @@ def exponential_descrease(idx_decoder, p=3):
 
 
 class AttentionHelper(nn.Module):
-    def __init__(self):
+    def __init__(self, args):
         super(AttentionHelper, self).__init__()
+        self.args = args
         self.softmax = nn.Softmax(dim=-1)
 
     def scalar_dot_att(self, proj_query, proj_key, proj_val, padding_mask):
@@ -45,14 +47,21 @@ class AttentionHelper(nn.Module):
             padding_mask + 1e-6
         )  # mask the zero paddings. log(1e-6) for zero paddings
         attention = self.softmax(attention)
+        # print("attention shape: ", attention.shape)
+        # print("proj_val shape: ", proj_val.shape)
+        # print("attention shape: ", attention.shape)
+        # print("padding_mask shape: ", padding_mask.shape)
         attention = attention * padding_mask
+        # print("attention * padding_mask shape: ", attention.shape)
         attention = attention.permute(0, 2, 1)
         out = torch.bmm(proj_val, attention)
         return out, attention
 
 
 class AttLayer(nn.Module):
-    def __init__(self, q_dim, k_dim, v_dim, r1, r2, r3, bl, stage, att_type):  # r1 = r2
+    def __init__(
+        self, q_dim, k_dim, v_dim, r1, r2, r3, bl, stage, att_type, args
+    ):  # r1 = r2
         super(AttLayer, self).__init__()
 
         self.query_conv = nn.Conv1d(
@@ -72,10 +81,11 @@ class AttLayer(nn.Module):
         self.bl = bl
         self.stage = stage
         self.att_type = att_type
-        assert self.att_type in ["normal_att", "block_att", "sliding_att"]
+        self.args = args
+        assert self.att_type in ["normal_att", "block_att", "sliding_att", "causal_att"]
         assert self.stage in ["encoder", "decoder"]
 
-        self.att_helper = AttentionHelper()
+        self.att_helper = AttentionHelper(args)
         self.window_mask = self.construct_window_mask()
 
     def construct_window_mask(self):
@@ -106,6 +116,8 @@ class AttLayer(nn.Module):
             return self._block_wise_self_att(query, key, value, mask)
         elif self.att_type == "sliding_att":
             return self._sliding_window_self_att(query, key, value, mask)
+        elif self.att_type == "causal_att":
+            return self._causal_self_att(query, key, value, mask)
 
     def _normal_self_att(self, q, k, v, mask):
         m_batchsize, c1, L = q.size()
@@ -267,10 +279,69 @@ class AttLayer(nn.Module):
             dim=0,
         )  # of shape (m*nb, 1, 2l)
         final_mask = self.window_mask.repeat(m_batchsize * nb, 1, 1) * padding_mask
-
         output, attention = self.att_helper.scalar_dot_att(q, k, v, final_mask)
         output = self.conv_out(F.relu(output))
+        output = (
+            output.reshape(m_batchsize, nb, -1, self.bl)
+            .permute(0, 2, 1, 3)
+            .reshape(m_batchsize, -1, nb * self.bl)
+        )
+        output = output[:, :, 0:L]
+        return output * mask[:, 0:1, :]
 
+    def _causal_self_att(self, q, k, v, mask):
+        m_batchsize, c1, L = q.size()
+        _, c2, L = k.size()
+        _, c3, L = v.size()
+
+        nb = L // self.bl
+        if L % self.bl != 0:
+            q = torch.cat(
+                [q, torch.zeros((m_batchsize, c1, self.bl - L % self.bl)).to(device)],
+                dim=-1,
+            )
+            k = torch.cat(
+                [k, torch.zeros((m_batchsize, c2, self.bl - L % self.bl)).to(device)],
+                dim=-1,
+            )
+            v = torch.cat(
+                [v, torch.zeros((m_batchsize, c3, self.bl - L % self.bl)).to(device)],
+                dim=-1,
+            )
+            nb += 1
+
+        padding_mask = torch.cat(
+            [
+                torch.ones((m_batchsize, 1, L)).to(device) * mask[:, 0:1, :],
+                torch.zeros((m_batchsize, 1, self.bl * nb - L)).to(device),
+            ],
+            dim=-1,
+        )
+
+        q = (
+            q.reshape(m_batchsize, c1, nb, self.bl)
+            .permute(0, 2, 1, 3)
+            .reshape(m_batchsize * nb, c1, self.bl)
+        )
+        padding_mask = (
+            padding_mask.reshape(m_batchsize, 1, nb, self.bl)
+            .permute(0, 2, 1, 3)
+            .reshape(m_batchsize * nb, 1, self.bl)
+        )
+        k = (
+            k.reshape(m_batchsize, c2, nb, self.bl)
+            .permute(0, 2, 1, 3)
+            .reshape(m_batchsize * nb, c2, self.bl)
+        )
+        v = (
+            v.reshape(m_batchsize, c3, nb, self.bl)
+            .permute(0, 2, 1, 3)
+            .reshape(m_batchsize * nb, c3, self.bl)
+        )
+        causal_mask = torch.tril(torch.ones((self.bl, self.bl))).unsqueeze(0).to(device)
+        padding_mask = padding_mask * causal_mask
+        output, attentions = self.att_helper.scalar_dot_att(q, k, v, padding_mask)
+        output = self.conv_out(F.relu(output))
         output = (
             output.reshape(m_batchsize, nb, -1, self.bl)
             .permute(0, 2, 1, 3)
@@ -331,7 +402,7 @@ class FCFeedForward(nn.Module):
 
 class AttModule(nn.Module):
     def __init__(
-        self, dilation, in_channels, out_channels, r1, r2, att_type, stage, alpha
+        self, dilation, in_channels, out_channels, r1, r2, att_type, stage, alpha, args
     ):
         super(AttModule, self).__init__()
         self.feed_forward = ConvFeedForward(dilation, in_channels, out_channels)
@@ -346,6 +417,7 @@ class AttModule(nn.Module):
             dilation,
             att_type=att_type,
             stage=stage,
+            args=args,
         )  # dilation
         self.conv_1x1 = nn.Conv1d(out_channels, out_channels, 1)
         self.dropout = nn.Dropout()
@@ -371,8 +443,10 @@ class AttModule_mamba(nn.Module):
         stage,
         alpha,
         drop_path_rate=0.3,
+        args=None,
     ):
         super(AttModule_mamba, self).__init__()
+        self.args = args
         self.feed_forward = ConvFeedForward(dilation, in_channels, out_channels)
         self.instance_norm = nn.InstanceNorm1d(in_channels, track_running_stats=False)
         self.att_layer = MaskMambaBlock(
@@ -429,6 +503,7 @@ class Encoder(nn.Module):
         alpha,
         mamba=False,
         drop_path_rate=0.3,
+        args=None,
     ):
         super(Encoder, self).__init__()
         self.conv_1x1 = nn.Conv1d(input_dim, num_f_maps, 1)  # fc layer
@@ -436,7 +511,15 @@ class Encoder(nn.Module):
             self.layers = nn.ModuleList(
                 [
                     AttModule(
-                        2**i, num_f_maps, num_f_maps, r1, r2, att_type, "encoder", alpha
+                        2**i,
+                        num_f_maps,
+                        num_f_maps,
+                        r1,
+                        r2,
+                        att_type,
+                        "encoder",
+                        alpha,
+                        args,
                     )
                     for i in range(num_layers)  # 2**i
                 ]
@@ -454,6 +537,7 @@ class Encoder(nn.Module):
                         "encoder",
                         alpha,
                         drop_path_rate=drop_path_rate,
+                        args=args,
                     )
                     for i in range(num_layers)  # 2**i
                 ]
@@ -497,6 +581,7 @@ class Decoder(nn.Module):
         alpha,
         mamba=False,
         drop_path_rate=0.3,
+        args=None,
     ):
         super(
             Decoder, self
@@ -506,7 +591,15 @@ class Decoder(nn.Module):
             self.layers = nn.ModuleList(
                 [
                     AttModule(
-                        2**i, num_f_maps, num_f_maps, r1, r2, att_type, "decoder", alpha
+                        2**i,
+                        num_f_maps,
+                        num_f_maps,
+                        r1,
+                        r2,
+                        att_type,
+                        "decoder",
+                        alpha,
+                        args=args,
                     )
                     for i in range(num_layers)  # 2 ** i
                 ]
@@ -524,6 +617,7 @@ class Decoder(nn.Module):
                         "decoder",
                         alpha,
                         drop_path_rate=drop_path_rate,
+                        args=args,
                     )
                     for i in range(num_layers)  # 2 ** i
                 ]
@@ -554,6 +648,7 @@ class MyTransformer(nn.Module):
         channel_masking_rate,
         drop_path_rate=0.3,
         encoder_only=False,
+        args=None,
     ):
         super(MyTransformer, self).__init__()
         self.encoder_only = encoder_only
@@ -565,8 +660,9 @@ class MyTransformer(nn.Module):
             input_dim,
             num_classes,
             channel_masking_rate,
-            att_type="sliding_att",
+            att_type="causal_att" if args.causal else "sliding_att",
             alpha=1,
+            args=args,
         )
         if encoder_only:
             self.decoders = nn.ModuleList(
@@ -580,8 +676,9 @@ class MyTransformer(nn.Module):
                             num_classes,
                             num_classes,
                             channel_masking_rate,
-                            att_type="sliding_att",
+                            att_type="causal_att" if args.causal else "sliding_att",
                             alpha=exponential_descrease(s),
+                            args=args,
                         )
                     )
                     for s in range(num_decoders)
@@ -600,6 +697,7 @@ class MyTransformer(nn.Module):
                             num_classes,
                             att_type="sliding_att",
                             alpha=exponential_descrease(s),
+                            args=args,
                         )
                     )
                     for s in range(num_decoders)
@@ -636,6 +734,7 @@ class MaTransformer(nn.Module):
         num_classes,
         channel_masking_rate,
         drop_path_rate=0.3,
+        args=None,
     ):
         super(MaTransformer, self).__init__()
         self.encoder = Encoder(
@@ -650,6 +749,7 @@ class MaTransformer(nn.Module):
             alpha=1,
             mamba=True,
             drop_path_rate=drop_path_rate,
+            args=args,
         )
         self.decoders = nn.ModuleList(
             [
@@ -664,6 +764,7 @@ class MaTransformer(nn.Module):
                         att_type="sliding_att",
                         alpha=exponential_descrease(s),
                         drop_path_rate=drop_path_rate,
+                        args=args,
                     )
                 )
                 for s in range(num_decoders)
@@ -708,6 +809,7 @@ class Trainer:
                 num_classes,
                 channel_masking_rate,
                 encoder_only=args.encoder_only,
+                args=args,
             )
         else:
             self.model = MaTransformer(
@@ -720,10 +822,11 @@ class Trainer:
                 num_classes,
                 channel_masking_rate,
                 drop_path_rate=drop_path_rate,
+                args=args,
             )
         self.ce = nn.CrossEntropyLoss(ignore_index=-100)
-
-        print("Model Size: ", sum(p.numel() for p in self.model.parameters()))
+        self.args = args
+        # print("Model Size: ", sum(p.numel() for p in self.model.parameters()))
         self.mse = nn.MSELoss(reduction="none")
         self.num_classes = num_classes
 
@@ -735,17 +838,23 @@ class Trainer:
         batch_size,
         learning_rate,
         batch_gen_tst=None,
+        patience=10,  # Adding a patience parameter for early stopping
     ):
         self.model.train()
         self.model.to(device)
         optimizer = optim.Adam(
             self.model.parameters(), lr=learning_rate, weight_decay=1e-5
         )
-        print("LR:{}".format(learning_rate))
+        # print("LR:{}".format(learning_rate))
 
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", factor=0.5, patience=3, verbose=True
         )
+
+        best_acc = 0
+        best_epoch = 0
+        epochs_without_improvement = 0
+
         for epoch in range(num_epochs):
             epoch_loss = 0
             correct = 0
@@ -795,28 +904,77 @@ class Trainer:
 
             scheduler.step(epoch_loss)
             batch_gen.reset()
+            epoch_acc = float(correct) / total
             print(
                 "[epoch %d]: epoch loss = %f,   acc = %f"
                 % (
                     epoch + 1,
                     epoch_loss / len(batch_gen.list_of_examples),
-                    float(correct) / total,
+                    epoch_acc,
                 )
             )
 
-            # if (epoch + 1) % 10 == 0 and batch_gen_tst is not None:
-            if (epoch + 1) % 1 == 0 and batch_gen_tst is not None:
-                self.test(batch_gen_tst, epoch)
-                if not os.path.exists(save_dir):
-                    os.makedirs(save_dir, exist_ok=True)
-                torch.save(
-                    self.model.state_dict(),
-                    save_dir + "/epoch-" + str(epoch + 1) + ".model",
+            # Calculate test accuracy if test generator is provided
+            if batch_gen_tst is not None:
+                test_acc = self.test(batch_gen_tst, epoch)
+                if test_acc > best_acc:
+                    best_acc = test_acc
+                    best_epoch = epoch + 1
+
+                    # Remove all previous best models
+                    for filename in os.listdir(save_dir):
+                        if filename.startswith("best_"):
+                            file_path = os.path.join(save_dir, filename)
+                            try:
+                                if os.path.isfile(file_path) or os.path.islink(
+                                    file_path
+                                ):
+                                    os.unlink(file_path)
+                                elif os.path.isdir(file_path):
+                                    shutil.rmtree(file_path)
+                            except Exception as e:
+                                print(f"Failed to delete {file_path}. Reason: {e}")
+
+                    # Save the new best model
+                    torch.save(
+                        self.model.state_dict(),
+                        save_dir + f"/best_{best_epoch}.model",
+                    )
+                    torch.save(
+                        optimizer.state_dict(),
+                        save_dir + f"/best_{best_epoch}.opt",
+                    )
+                    print(
+                        f"Best model saved at epoch {best_epoch} with test accuracy {best_acc:.4f}"
+                    )
+                    epochs_without_improvement = 0  # Reset patience counter
+
+                else:
+                    epochs_without_improvement += 1
+                    print(f"No improvement for {epochs_without_improvement} epochs.")
+
+            # Early stopping condition
+            if epochs_without_improvement >= patience:
+                print(
+                    f"Early stopping triggered after {epochs_without_improvement} epochs without improvement."
                 )
-                torch.save(
-                    optimizer.state_dict(),
-                    save_dir + "/epoch-" + str(epoch + 1) + ".opt",
-                )
+                break
+
+            # Save current epoch's model
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir, exist_ok=True)
+            torch.save(
+                self.model.state_dict(),
+                save_dir + "/epoch-" + str(epoch + 1) + ".model",
+            )
+            torch.save(
+                optimizer.state_dict(),
+                save_dir + "/epoch-" + str(epoch + 1) + ".opt",
+            )
+
+        print(
+            f"Training complete. Best model saved at epoch {best_epoch} with test accuracy {best_acc:.4f}"
+        )
 
     def test(self, batch_gen_tst, epoch):
         self.model.eval()
@@ -848,104 +1006,81 @@ class Trainer:
         self.model.train()
         batch_gen_tst.reset()
 
+        return acc
+
     def predict(
         self,
         model_dir,
-        results_dir,
-        features_path,
+        result_dir,
         batch_gen_tst,
         epoch,
-        actions_dict,
-        sample_rate,
     ):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.eval()
-        with torch.no_grad():
+
+        best_model_path = self._find_best_model(model_dir)
+        if best_model_path:
+            print(f"Loading best model from: {best_model_path}")
+            self.model.load_state_dict(torch.load(best_model_path))
             self.model.to(device)
-            self.model.load_state_dict(
-                torch.load(model_dir + "/epoch-" + str(epoch) + ".model"), strict=False
-            )
+        else:
+            print("No best model found.")
+            return
 
-            batch_gen_tst.reset()
-            import time
+        self.model.eval()
+        correct_predictions = 0
+        total_predictions = 0
 
-            time_start = time.time()
-
-            correct_predictions = 0
-            total_predictions = 0
-
+        with torch.no_grad():
             while batch_gen_tst.has_next():
-                batch_input, batch_target, mask, vids = batch_gen_tst.next_batch(1)
-                vid = vids[0]
-                print(vid)
-                with open(features_path + vid.split(".")[0] + ".pkl", "rb") as f:
-                    features = pickle.load(f)
-
-                input_x = torch.tensor(features, dtype=torch.float)
-                if input_x.size()[-1] == 1 and input_x.size()[-2] == 1:
-                    input_x = input_x.squeeze(-1).squeeze(-1)
-
-                input_x.unsqueeze_(0)
-                print(input_x.shape)
-                input_x = input_x.to(device)
-                batch_target = batch_target.to(device)
-                mask = mask.to(device)
-
-                predictions = self.model(
-                    input_x, torch.ones(input_x.size(), device=device)
+                batch_input, batch_target, mask, vids = batch_gen_tst.next_batch(
+                    1, if_warp=False
+                )
+                batch_input, batch_target, mask = (
+                    batch_input.to(device),
+                    batch_target.to(device),
+                    mask.to(device),
                 )
 
-                for i in range(len(predictions)):
-                    confidence, predicted = torch.max(
-                        F.softmax(predictions[i], dim=1).data, 1
-                    )
-                    confidence, predicted = confidence.squeeze(), predicted.squeeze()
+                # Get predictions from the model
+                p = self.model(batch_input, mask)
+                _, predicted = torch.max(p.data[-1], 1)
 
-                    batch_target = batch_target.squeeze()
-                    confidence, predicted = confidence.squeeze(), predicted.squeeze()
-                    # Calculate accuracy
-                    if i == len(predictions) - 1:
-                        print(
-                            "Acc: "
-                            + str(
-                                (predicted == batch_target).sum().item()
-                                / batch_target.size(0)
-                            )
-                        )
-                        correct_predictions += (predicted == batch_target).sum().item()
-                        total_predictions += batch_target.size(0)
+                # Calculate accuracy
+                correct_predictions += (
+                    ((predicted == batch_target).float() * mask[:, 0, :].squeeze(1))
+                    .sum()
+                    .item()
+                )
+                total_predictions += torch.sum(mask[:, 0, :]).item()
 
-                    segment_bars_with_confidence(
-                        results_dir + "/{}_stage{}.png".format(vid, i),
-                        confidence.tolist(),
-                        batch_target.tolist(),
-                        predicted.tolist(),
-                    )
+                # Generate phase recognition plot
+                vid = vids[0]  # Assuming vids is a list with a single video ID
+                save_path = f"{result_dir}/{vid}_epoch{epoch}_plot.png"
+                self.plot_phase_recognition(
+                    save_path, predicted.cpu().numpy(), batch_target.cpu().numpy()
+                )
 
-                recognition = []
-                for i in range(len(predicted)):
-                    recognition = np.concatenate(
-                        (
-                            recognition,
-                            [
-                                list(actions_dict.keys())[
-                                    list(actions_dict.values()).index(
-                                        predicted[i].item()
-                                    )
-                                ]
-                            ]
-                            * sample_rate,
-                        )
-                    )
-                f_name = vid.split("/")[-1].split(".")[0]
-                with open(results_dir + "/" + f_name, "w") as f_ptr:
-                    f_ptr.write("### Frame level recognition: ###\n")
-                    f_ptr.write(" ".join(recognition))
-            time_end = time.time()
+        # Calculate overall accuracy
+        accuracy = correct_predictions / total_predictions
+        print(f"Prediction complete. Accuracy: {accuracy * 100:.2f}%")
 
-            # Print final accuracy
-            accuracy = correct_predictions / total_predictions
-            print(f"Accuracy: {accuracy * 100:.2f}%")
+    def _find_best_model(self, model_dir):
+        # Find the latest best model file in the directory
+        best_models = [
+            f
+            for f in os.listdir(model_dir)
+            if f.startswith("best_") and f.endswith(".model")
+        ]
+        if not best_models:
+            return None
+        best_model_path = max(
+            [os.path.join(model_dir, f) for f in best_models], key=os.path.getctime
+        )
+        return best_model_path
+
+    def plot_phase_recognition(self, save_path, predicted, batch_target):
+        # Plot the phase recognition results
+        segment_bars_with_confidence(save_path, None, batch_target, predicted)
 
 
 if __name__ == "__main__":
@@ -959,7 +1094,14 @@ if __name__ == "__main__":
     mask = torch.ones(1, num_classes, 100).cuda()
 
     model = MyTransformer(
-        3, num_layers, 2, 2, num_f_maps, features_dim, num_classes, 0.1
+        3,
+        num_layers,
+        2,
+        2,
+        num_f_maps,
+        features_dim,
+        num_classes,
+        0.1,
     ).cuda()
     out2 = model(x, mask)
     print(out2.shape)
