@@ -129,17 +129,25 @@ def segment_bars(save_path, *labels):
     plt.close()
 
 
+# def segment_bars_with_confidence(save_path, *labels):
 def segment_bars_with_confidence(save_path, confidence, *labels):
     num_pics = len(labels) + 1
-
     fig = plt.figure(figsize=(15, num_pics * 1.5))
 
     interval = 1 / (num_pics + 1)
     for i, label in enumerate(labels):
         i = i + 1
         ax1 = fig.add_axes([0, 1 - i * interval, 1, interval])
+
+        # Ensure the label is squeezed to remove unnecessary dimensions
+        label = np.squeeze(label)
+
+        # If label is 1D, convert it to 2D for imshow
+        if label.ndim == 1:
+            label = label[np.newaxis, :]
+
         ax1.imshow(
-            [label],
+            label,
             aspect="auto",
             cmap=saturated_pastel_rainbow,
             interpolation="nearest",
@@ -147,11 +155,11 @@ def segment_bars_with_confidence(save_path, confidence, *labels):
             vmax=len(colors),
         )
 
-    ax4 = fig.add_axes([0, interval, 1, interval])
-    ax4.set_xlim(0, len(confidence))
-    ax4.set_ylim(0, 1)
-    ax4.plot(range(len(confidence)), confidence)
-    ax4.plot(range(len(confidence)), [0.3] * len(confidence), color="red", label="0.3")
+    # ax4 = fig.add_axes([0, interval, 1, interval])
+    # ax4.set_xlim(0, len(confidence))
+    # ax4.set_ylim(0, 1)
+    # ax4.plot(range(len(confidence)), confidence)
+    # ax4.plot(range(len(confidence)), [0.3] * len(confidence), color="red", label="0.3")
 
     if save_path is not None:
         plt.savefig(save_path)
