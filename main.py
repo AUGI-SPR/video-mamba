@@ -62,6 +62,11 @@ else:
         args.num_epochs,
     )
 
+if args.causal:
+    args.addstr = "causal_" + args.addstr
+else:
+    args.addstr = "bidirectional_" + args.addstr
+
 dataset = args.dataset
 causal = args.causal
 drop_path_rate = args.drop_path_rate
@@ -124,6 +129,9 @@ if args.action == "train":
         model_dir, batch_gen, num_epochs, batch_size, lr, batch_gen_tst, patience
     )
     print("Finished training")
+
+    if not os.path.exists(result_dir):
+        os.makedirs(result_dir)
 
     trainer.predict(
         model_dir,
