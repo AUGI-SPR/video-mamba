@@ -984,10 +984,12 @@ class MaskMambaBlock(nn.Module):
         kernel_size=4,  # conv kernel size
         n_ds_stride=1,  # downsampling stride for the current layer
         drop_path_rate=0.3,  # drop path rate
+        args=None,
     ) -> None:
         super().__init__()
+        bimamba_type = "none" if args.causal else "v2"
         self.mamba = ViM(
-            n_embd, d_conv=kernel_size, use_fast_path=True, bimamba_type="v2"
+            n_embd, d_conv=kernel_size, use_fast_path=True, bimamba_type=bimamba_type
         )
         if n_ds_stride > 1:
             self.downsample = MaxPooler(kernel_size=3, stride=2, padding=1)

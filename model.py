@@ -450,7 +450,7 @@ class AttModule_mamba(nn.Module):
         self.feed_forward = ConvFeedForward(dilation, in_channels, out_channels)
         self.instance_norm = nn.InstanceNorm1d(in_channels, track_running_stats=False)
         self.att_layer = MaskMambaBlock(
-            in_channels, drop_path_rate=drop_path_rate
+            in_channels, drop_path_rate=drop_path_rate, args=args
         )  # dilation
         # self.att_layer = MaskMambaBlock_DBM(in_channels, drop_path_rate=drop_path_rate) # dilation
         self.conv_1x1 = nn.Conv1d(in_channels, out_channels, 1)
