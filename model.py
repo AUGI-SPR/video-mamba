@@ -460,9 +460,10 @@ class AttModule_mamba(nn.Module):
     def forward(self, x, f, mask):
         m_batchsize, c1, L = x.size()
         padding_mask = torch.ones((m_batchsize, 1, L)).to(device) * mask[:, 0:1, :]
-        out = self.feed_forward(x)
-        out = self.alpha * self.att_layer(self.instance_norm(out), padding_mask) + out
-        # out = self.conv_1x1(out)
+        # out = self.feed_forward(x)
+        # out = self.alpha * self.att_layer(self.instance_norm(x), padding_mask) + x
+        out = self.alpha * self.att_layer(x, padding_mask) + x
+        out = self.conv_1x1(out)
         out = self.dropout(out)
         return (x + out) * mask[:, 0:1, :]
 
@@ -759,7 +760,7 @@ class MaTransformer(nn.Module):
             input_dim,
             num_classes,
             channel_masking_rate,
-            att_type="sliding_att",
+            att_type="causal_att",
             alpha=1,
             mamba=True,
             drop_path_rate=drop_path_rate,
@@ -775,8 +776,9 @@ class MaTransformer(nn.Module):
                         num_f_maps,
                         num_classes,
                         num_classes,
-                        att_type="sliding_att",
+                        att_type="causal_att",
                         alpha=exponential_descrease(s),
+                        mamba=True,
                         drop_path_rate=drop_path_rate,
                         args=args,
                     )
@@ -827,7 +829,7 @@ class Trainer:
             )
         else:
             self.model = MaTransformer(
-                3,
+                0,
                 num_layers,
                 r1,
                 r2,

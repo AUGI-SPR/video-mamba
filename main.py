@@ -31,7 +31,7 @@ parser.add_argument("--drop_path_rate", type=float, default=0.1)  #
 parser.add_argument("--channel_mask_rate", type=float, default=0.3)  #
 parser.add_argument("--lr", type=float, default=0.0005)  #
 parser.add_argument("--num_epochs", type=int, default=150)
-parser.add_argument("--num_layers", type=int, default=8)  #
+parser.add_argument("--num_layers", type=int, default=9)  #
 parser.add_argument("--load_epoch", type=int, default=0)
 parser.add_argument("--encoder_only", action="store_true")
 parser.add_argument("--addstr", type=str, default="")
@@ -45,11 +45,11 @@ parser.add_argument("--patience", type=int, default=10)  #
 
 args = parser.parse_args()
 
-# args.action = "train"
-# args.dataset = "cholec80"
-# args.feature_extractor = "resnet"
-# args.causal = False
-# args.mamba = True
+args.action = "train"
+args.dataset = "phakir"
+args.feature_extractor = "lovit_finetuned"
+args.causal = True
+args.mamba = True
 
 # args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
 args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
