@@ -92,6 +92,7 @@ def f_score(recognized, ground_truth, overlap, bg_class=["background"]):
 
 # Define a more saturated pastel rainbow color map
 colors = [
+    "#000000",
     "#DD5050",
     "#ED9039",
     "#F0C518",

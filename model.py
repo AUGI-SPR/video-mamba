@@ -506,6 +506,15 @@ class Encoder(nn.Module):
         args=None,
     ):
         super(Encoder, self).__init__()
+
+        self.proj = nn.Sequential(
+            nn.Linear(2048, 1024),  # 첫 번째 Linear 레이어
+            nn.ReLU(),  # 두 번째 ReLU
+            nn.Linear(
+                1024, input_dim
+            ),  # 세 번째 Linear 레이어, 최종적으로 input_dim으로 줄임
+        )
+
         self.conv_1x1 = nn.Conv1d(input_dim, num_f_maps, 1)  # fc layer
         if not mamba:
             self.layers = nn.ModuleList(
@@ -542,7 +551,7 @@ class Encoder(nn.Module):
                     for i in range(num_layers)  # 2**i
                 ]
             )
-
+        self.args = args
         self.conv_out = nn.Conv1d(num_f_maps, num_classes, 1)
         self.dropout = nn.Dropout2d(p=channel_masking_rate)
         self.channel_masking_rate = channel_masking_rate
@@ -558,6 +567,11 @@ class Encoder(nn.Module):
             x = x.unsqueeze(2)
             x = self.dropout(x)
             x = x.squeeze(2)
+
+        if self.args.feature_extractor == "resnet":
+            x = x.permute(0, 2, 1)  # (N, L, C) where C is the last dimension
+            x = self.proj(x)  # Apply the Sequential block
+            x = x.permute(0, 2, 1)  # Back to (N, input_dim, L)
 
         feature = self.conv_1x1(x)
         for layer in self.layers:
@@ -824,7 +838,24 @@ class Trainer:
                 drop_path_rate=drop_path_rate,
                 args=args,
             )
-        self.ce = nn.CrossEntropyLoss(ignore_index=-100)
+        self.ce = nn.CrossEntropyLoss(
+            weight=torch.tensor(
+                np.array(
+                    [
+                        0,
+                        1.0,
+                        0.6591731266149871,
+                        1.4865967365967365,
+                        0.5932558139534884,
+                        4.621376811594203,
+                        0.952220977976857,
+                        1.3670953912111468,
+                    ]
+                ),
+                dtype=torch.float,
+            ).to(device),
+            ignore_index=-100,
+        )
         self.args = args
         # print("Model Size: ", sum(p.numel() for p in self.model.parameters()))
         self.mse = nn.MSELoss(reduction="none")
@@ -845,7 +876,6 @@ class Trainer:
         optimizer = optim.Adam(
             self.model.parameters(), lr=learning_rate, weight_decay=1e-5
         )
-        # print("LR:{}".format(learning_rate))
 
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", factor=0.5, patience=3, verbose=True
@@ -869,15 +899,24 @@ class Trainer:
                     batch_target.to(device),
                     mask.to(device),
                 )
+
+                # Ignore targets where gt class == 0
+                valid_mask = batch_target != 0
+
                 optimizer.zero_grad()
                 ps = self.model(batch_input, mask)
 
                 loss = 0
                 for p in ps:
-                    loss += self.ce(
-                        p.transpose(2, 1).contiguous().view(-1, self.num_classes),
-                        batch_target.view(-1),
-                    )
+                    # Apply valid_mask to ignore gt class == 0
+                    loss += (
+                        self.ce(
+                            p.transpose(2, 1).contiguous().view(-1, self.num_classes),
+                            batch_target.view(-1),
+                        )
+                        * valid_mask.view(-1).float()
+                    )  # Apply mask to ignore gt == 0
+
                     loss += 0.15 * torch.mean(
                         torch.clamp(
                             self.mse(
@@ -890,17 +929,19 @@ class Trainer:
                         * mask[:, :, 1:]
                     )
 
+                loss = loss.mean()
                 epoch_loss += loss.item()
                 loss.backward()
                 optimizer.step()
 
+                # Accuracy 계산 시 gt class가 0인 경우 무시
                 _, predicted = torch.max(ps.data[-1], 1)
+                valid_mask = (batch_target != 0).float() * mask[:, 0, :].squeeze(1)
+
                 correct += (
-                    ((predicted == batch_target).float() * mask[:, 0, :].squeeze(1))
-                    .sum()
-                    .item()
+                    ((predicted == batch_target).float() * valid_mask).sum().item()
                 )
-                total += torch.sum(mask[:, 0, :]).item()
+                total += valid_mask.sum().item()
 
             scheduler.step(epoch_loss)
             batch_gen.reset()
@@ -914,14 +955,14 @@ class Trainer:
                 )
             )
 
-            # Calculate test accuracy if test generator is provided
+            # Test accuracy 계산 시에도 동일한 방식으로 적용
             if batch_gen_tst is not None:
                 test_acc = self.test(batch_gen_tst, epoch)
                 if test_acc > best_acc:
                     best_acc = test_acc
                     best_epoch = epoch + 1
 
-                    # Remove all previous best models
+                    # 이전 최상의 모델 삭제 및 저장
                     for filename in os.listdir(save_dir):
                         if filename.startswith("best_"):
                             file_path = os.path.join(save_dir, filename)
@@ -935,7 +976,7 @@ class Trainer:
                             except Exception as e:
                                 print(f"Failed to delete {file_path}. Reason: {e}")
 
-                    # Save the new best model
+                    # 새로운 최상 모델 저장
                     torch.save(
                         self.model.state_dict(),
                         save_dir + f"/best_{best_epoch}.model",
@@ -991,14 +1032,15 @@ class Trainer:
                     batch_target.to(device),
                     mask.to(device),
                 )
+
+                # Accuracy 계산 시 gt class가 0인 경우 무시
                 p = self.model(batch_input, mask)
                 _, predicted = torch.max(p.data[-1], 1)
+                valid_mask = (batch_target != 0).float() * mask[:, 0, :].squeeze(1)
                 correct += (
-                    ((predicted == batch_target).float() * mask[:, 0, :].squeeze(1))
-                    .sum()
-                    .item()
+                    ((predicted == batch_target).float() * valid_mask).sum().item()
                 )
-                total += torch.sum(mask[:, 0, :]).item()
+                total += valid_mask.sum().item()
 
         acc = float(correct) / total
         print("---[epoch %d]---: tst acc = %f" % (epoch + 1, acc))
@@ -1022,6 +1064,7 @@ class Trainer:
             print(f"Loading best model from: {best_model_path}")
             self.model.load_state_dict(torch.load(best_model_path))
             self.model.to(device)
+            epoch = best_model_path.split("/")[-1].split(".")[0]
         else:
             print("No best model found.")
             return
@@ -1045,24 +1088,44 @@ class Trainer:
                 p = self.model(batch_input, mask)
                 _, predicted = torch.max(p.data[-1], 1)
 
-                # Calculate accuracy
-                correct_predictions += (
-                    ((predicted == batch_target).float() * mask[:, 0, :].squeeze(1))
-                    .sum()
-                    .item()
+                # Mask to ignore gt class == 0
+                valid_mask = (batch_target != 0).float() * mask[:, 0, :].squeeze(1)
+
+                # Calculate accuracy for the current batch, ignoring gt class == 0
+                correct_predictions_batch = (
+                    ((predicted == batch_target).float() * valid_mask).sum().item()
                 )
-                total_predictions += torch.sum(mask[:, 0, :]).item()
+                total_predictions_batch = valid_mask.sum().item()
+
+                # Avoid division by zero when there are no valid predictions
+                if total_predictions_batch > 0:
+                    accuracy_batch = correct_predictions_batch / total_predictions_batch
+                    print(f"Batch Accuracy: {accuracy_batch * 100:.2f}%")
+                else:
+                    print("No valid predictions in this batch (all gt classes are 0).")
+                    accuracy_batch = 0
+
+                # Update overall accuracy
+                correct_predictions += correct_predictions_batch
+                total_predictions += total_predictions_batch
 
                 # Generate phase recognition plot
                 vid = vids[0]  # Assuming vids is a list with a single video ID
-                save_path = f"{result_dir}/{vid}_epoch{epoch}_plot.png"
+                save_path = (
+                    f"{result_dir}/"
+                    + vid.split(".")[0]
+                    + f"_{epoch}_{accuracy_batch * 100:.2f}.png"
+                )
                 self.plot_phase_recognition(
                     save_path, predicted.cpu().numpy(), batch_target.cpu().numpy()
                 )
 
-        # Calculate overall accuracy
-        accuracy = correct_predictions / total_predictions
-        print(f"Prediction complete. Accuracy: {accuracy * 100:.2f}%")
+        # Calculate overall accuracy, ignoring cases where gt class == 0
+        if total_predictions > 0:
+            accuracy = correct_predictions / total_predictions
+            print(f"Prediction complete. Overall Accuracy: {accuracy * 100:.2f}%")
+        else:
+            print("No valid predictions (all gt classes were 0).")
 
     def _find_best_model(self, model_dir):
         # Find the latest best model file in the directory
