@@ -13,6 +13,8 @@ random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 
 data_path = "/data2/local_datasets/"
 model_path = "models"
@@ -22,52 +24,48 @@ result_path = "results"
 parser = argparse.ArgumentParser()
 parser.add_argument("--action", default="train")
 parser.add_argument("--dataset", default="cholec80")
+parser.add_argument("--feature_extractor", default="lovit")
 parser.add_argument("--mamba", action="store_true")
 parser.add_argument("--causal", action="store_true")
-parser.add_argument("--drop_path_rate", type=float, default=0.1)
-parser.add_argument("--channel_mask_rate", type=float, default=0.3)
-parser.add_argument("--lr", type=float, default=0.0005)
+parser.add_argument("--drop_path_rate", type=float, default=0.1)  #
+parser.add_argument("--channel_mask_rate", type=float, default=0.3)  #
+parser.add_argument("--lr", type=float, default=0.0005)  #
 parser.add_argument("--num_epochs", type=int, default=150)
-parser.add_argument("--num_layers", type=int, default=8)
+parser.add_argument("--num_layers", type=int, default=8)  #
 parser.add_argument("--load_epoch", type=int, default=0)
 parser.add_argument("--encoder_only", action="store_true")
 parser.add_argument("--addstr", type=str, default="")
-parser.add_argument("--num_f_maps", type=int, default=256)
+parser.add_argument("--num_f_maps", type=int, default=256)  #
 parser.add_argument("--features_dim", type=int, default=768)
 parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--sample_rate", type=int, default=1)  # 25
-parser.add_argument("--r1", type=int, default=2)
-parser.add_argument("--r2", type=int, default=2)
-parser.add_argument("--patience", type=int, default=5)
+parser.add_argument("--r1", type=int, default=2)  #
+parser.add_argument("--r2", type=int, default=2)  #
+parser.add_argument("--patience", type=int, default=10)  #
 
 args = parser.parse_args()
 
-args.action = "train"
-args.dataset = "autolaparo"
-args.causal = False
-args.mamba = False
+# args.action = "train"
+# args.dataset = "cholec80"
+# args.feature_extractor = "resnet"
+# args.causal = False
+# args.mamba = True
 
-if args.mamba:
-    args.addstr = "_mamba_dp%.2f_l%d_m%.2f_e%d" % (
-        args.drop_path_rate,
-        args.num_layers,
-        args.channel_mask_rate,
-        args.num_epochs,
-    )
-else:
-    args.addstr = "_transformer_dp%.2f_l%d_m%.2f_e%d" % (
-        args.drop_path_rate,
-        args.num_layers,
-        args.channel_mask_rate,
-        args.num_epochs,
-    )
+# args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
+args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
+    args.drop_path_rate,
+    args.num_layers,
+    args.channel_mask_rate,
+    args.lr,
+    args.num_f_maps,
+    args.r1,
+    args.r2,
+    args.patience,
+)
 
-if args.causal:
-    args.addstr = "causal_" + args.addstr
-else:
-    args.addstr = "bidirectional_" + args.addstr
 
 dataset = args.dataset
+feature_extractor = args.feature_extractor
 causal = args.causal
 drop_path_rate = args.drop_path_rate
 channel_mask_rate = args.channel_mask_rate
@@ -88,11 +86,31 @@ mamba = args.mamba
 
 vid_list_file = data_path + args.dataset + "/videos/train"
 vid_list_file_tst = data_path + args.dataset + "/videos/test"
-features_path = data_path + args.dataset + "/features/"
+features_path = data_path + args.dataset + "/features/" + feature_extractor + "/"
 gt_path = data_path + args.dataset + "/groundtruth/"
 mapping_file = os.path.join(data_path, args.dataset, "mapping.txt")
-model_dir = "./{}/".format(model_path) + args.dataset + args.addstr
-result_dir = "./{}/".format(result_path) + args.dataset + args.addstr
+model_dir = (
+    "./{}/".format(model_path)
+    + ("ResNet-50/" if feature_extractor == "resnet" else "LoViT/")
+    + ("ASMamba/" if mamba else "ASFormer/")
+    + ("causal/" if causal else "bidirectional/")
+    + args.dataset
+    + "/"
+    + args.feature_extractor
+    + "/"
+    + args.addstr
+)
+result_dir = (
+    "./{}/".format(result_path)
+    + ("ResNet-50/" if feature_extractor == "resnet" else "LoViT/")
+    + ("ASMamba/" if mamba else "ASFormer/")
+    + ("causal/" if causal else "bidirectional/")
+    + args.dataset
+    + "/"
+    + args.feature_extractor
+    + "/"
+    + args.addstr
+)
 
 
 phases_dict, num_classes = get_phases(mapping_file)
@@ -157,3 +175,5 @@ if args.action == "predict":
         batch_gen_tst,
         load_epoch,
     )
+
+print(args)
