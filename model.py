@@ -667,6 +667,7 @@ class MyTransformer(nn.Module):
     ):
         super(MyTransformer, self).__init__()
         self.encoder_only = encoder_only
+        self.num_decoders = args.num_decoders
         self.encoder = Encoder(
             num_layers,
             r1,
@@ -752,6 +753,7 @@ class MaTransformer(nn.Module):
         args=None,
     ):
         super(MaTransformer, self).__init__()
+        self.num_decoders = args.num_decoders
         self.encoder = Encoder(
             num_layers,
             r1,
@@ -816,7 +818,7 @@ class Trainer:
     ):
         if not mamba:
             self.model = MyTransformer(
-                3,
+                args.num_decoders,
                 num_layers,
                 r1,
                 r2,
@@ -829,7 +831,7 @@ class Trainer:
             )
         else:
             self.model = MaTransformer(
-                0,
+                args.num_decoders,
                 num_layers,
                 r1,
                 r2,
