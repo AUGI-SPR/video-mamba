@@ -816,6 +816,90 @@ class Trainer:
         drop_path_rate=0.3,
         args=None,
     ):
+        self.prior_knowledge = args.prior_knowledge
+        self.transition_matrix = [
+            [
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+            ],
+            [
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+            ],
+            [
+                args.low_penalty,
+                args.high_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+            ],
+            [
+                args.low_penalty,
+                args.high_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+            ],
+            [
+                args.low_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.high_penalty,
+            ],
+            [
+                args.low_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+            ],
+            [
+                args.low_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.low_penalty,
+                args.low_penalty,
+                args.low_penalty,
+            ],
+            [
+                args.low_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.high_penalty,
+                args.low_penalty,
+                args.low_penalty,
+            ],
+        ]
+
         if not mamba:
             self.model = MyTransformer(
                 args.num_decoders,
@@ -859,6 +943,7 @@ class Trainer:
                 dtype=torch.float,
             ).to(device),
             ignore_index=-100,
+            reduction="none",
         )
         self.args = args
         # print("Model Size: ", sum(p.numel() for p in self.model.parameters()))
@@ -912,14 +997,38 @@ class Trainer:
 
                 loss = 0
                 for p in ps:
-                    # Apply valid_mask to ignore gt class == 0
-                    loss += (
-                        self.ce(
-                            p.transpose(2, 1).contiguous().view(-1, self.num_classes),
-                            batch_target.view(-1),
+                    if self.prior_knowledge == "transition":
+                        # Apply valid_mask to ignore gt class == 0
+                        ce_loss = (
+                            self.ce(
+                                p.transpose(2, 1)
+                                .contiguous()
+                                .view(-1, self.num_classes),
+                                batch_target.view(-1),
+                            )
+                            * valid_mask.view(-1).float()
                         )
-                        * valid_mask.view(-1).float()
-                    )  # Apply mask to ignore gt == 0
+
+                        for i in range(1, p.shape[2]):
+                            prev_class = batch_target[0][i - 1]
+                            curr_class = batch_target[0][i]
+                            transition_penalty = self.transition_matrix[prev_class][
+                                curr_class
+                            ]
+                            ce_loss[i] *= transition_penalty
+
+                        mean_ce_loss = ce_loss.mean()
+                        loss += mean_ce_loss
+                    else:
+                        loss += (
+                            self.ce(
+                                p.transpose(2, 1)
+                                .contiguous()
+                                .view(-1, self.num_classes),
+                                batch_target.view(-1),
+                            )
+                            * valid_mask.view(-1).float()
+                        )  # Apply mask to ignore gt == 0
 
                     loss += 0.15 * torch.mean(
                         torch.clamp(
