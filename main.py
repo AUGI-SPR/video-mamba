@@ -7,14 +7,42 @@ from utils.get_phases import get_phases
 from batch_gen_gpt import BatchGenerator
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 seed = 19990328
+
 random.seed(seed)
 torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+np.random.seed(seed)
 
+
+# Generate some random numbers to check if seeds are set
+print("Random number with random module: ", random.random())
+print("Random tensor with torch (CPU): ", torch.randn(1))
+if torch.cuda.is_available():
+    print("Random tensor with torch (CUDA): ", torch.randn(1).cuda())
+
+print("Random number with numpy: ", np.random.rand())
+
+# Reset seed and check for reproducibility
+random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+np.random.seed(seed)
+
+# Generate the same random numbers again
+print("\nAfter resetting seed:")
+print("Random number with random module: ", random.random())
+print("Random tensor with torch (CPU): ", torch.randn(1))
+if torch.cuda.is_available():
+    print("Random tensor with torch (CUDA): ", torch.randn(1).cuda())
+
+print("Random number with numpy: ", np.random.rand())
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 data_path = "/data2/local_datasets/"
 model_path = "models"
@@ -31,7 +59,7 @@ parser.add_argument("--drop_path_rate", type=float, default=0.1)  #
 parser.add_argument("--channel_mask_rate", type=float, default=0.3)  #
 parser.add_argument("--lr", type=float, default=0.0005)  #
 parser.add_argument("--num_epochs", type=int, default=150)
-parser.add_argument("--num_decoders", type=int, default=5)  #
+parser.add_argument("--num_decoders", type=int, default=3)  #
 parser.add_argument("--num_layers", type=int, default=8)  #
 parser.add_argument("--load_epoch", type=int, default=0)
 parser.add_argument("--encoder_only", action="store_true")
@@ -42,7 +70,7 @@ parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--sample_rate", type=int, default=1)  # 25
 parser.add_argument("--r1", type=int, default=2)  #
 parser.add_argument("--r2", type=int, default=2)  #
-parser.add_argument("--patience", type=int, default=10)  #
+parser.add_argument("--patience", type=int, default=15)  #
 parser.add_argument("--low_penalty", type=float, default=1)
 parser.add_argument("--high_penalty", type=float, default=2)
 parser.add_argument("--prior_knowledge", type=str, default="transition")
@@ -68,6 +96,12 @@ args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d_d_%d" % (
     args.num_decoders,
 )
 args.addstr += "_" + args.prior_knowledge
+if (
+    args.prior_knowledge == "transition"
+    or args.prior_knowledge == "transition_order"
+    or args.prior_knowledge == "order"
+):
+    args.addstr += "_%.2f_%.2f" % (args.low_penalty, args.high_penalty)
 
 dataset = args.dataset
 feature_extractor = args.feature_extractor

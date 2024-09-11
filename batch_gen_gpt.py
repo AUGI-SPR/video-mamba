@@ -9,6 +9,15 @@ import random
 from grid_sampler import GridSampler, TimeWarpLayer
 import pickle
 
+seed = 19990328
+random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+np.random.seed(seed)
+
 
 class BatchGenerator(object):
     def __init__(self, num_classes, actions_dict, gt_path, features_path, sample_rate):
@@ -50,12 +59,11 @@ class BatchGenerator(object):
 
     def my_shuffle(self):
         # shuffle list_of_examples, gts, features with the same order
-        randnum = random.randint(0, 100)
-        random.seed(randnum)
+        random.seed(seed)
         random.shuffle(self.list_of_examples)
-        random.seed(randnum)
+        random.seed(seed)
         random.shuffle(self.gts)
-        random.seed(randnum)
+        random.seed(seed)
         random.shuffle(self.features)
 
     def warp_video(self, batch_input_tensor, batch_target_tensor):

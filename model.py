@@ -1,4 +1,5 @@
 import os
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,6 +12,15 @@ import shutil
 from modeling.blocks import MaskMambaBlock, MaskMambaBlock_DBM
 
 from eval import segment_bars_with_confidence
+
+seed = 19990328
+random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+np.random.seed(seed)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -817,87 +827,17 @@ class Trainer:
         args=None,
     ):
         self.prior_knowledge = args.prior_knowledge
+        h = args.high_penalty
+        l = args.low_penalty
         self.transition_matrix = [
-            [
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-            ],
-            [
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-            ],
-            [
-                args.low_penalty,
-                args.high_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-            ],
-            [
-                args.low_penalty,
-                args.high_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-            ],
-            [
-                args.low_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.high_penalty,
-            ],
-            [
-                args.low_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-            ],
-            [
-                args.low_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.low_penalty,
-                args.low_penalty,
-                args.low_penalty,
-            ],
-            [
-                args.low_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.high_penalty,
-                args.low_penalty,
-                args.low_penalty,
-            ],
+            [l, l, l, l, l, l, l, l],
+            [l, l, l, h, h, h, h, h],
+            [l, h, l, l, h, h, h, h],
+            [l, h, l, l, l, h, h, h],
+            [l, h, h, h, l, l, l, h],
+            [l, h, h, h, h, l, l, l],
+            [l, h, h, h, h, l, l, l],
+            [l, h, h, h, h, h, l, l],
         ]
 
         if not mamba:
@@ -1008,14 +948,58 @@ class Trainer:
                             )
                             * valid_mask.view(-1).float()
                         )
-
+                        predictions = torch.argmax(p, dim=1).cpu().numpy()
                         for i in range(1, p.shape[2]):
-                            prev_class = batch_target[0][i - 1]
-                            curr_class = batch_target[0][i]
-                            transition_penalty = self.transition_matrix[prev_class][
-                                curr_class
+                            prev_gt = batch_target[0][i - 1]
+                            curr_pred = predictions[0][i]
+                            transition_penalty = self.transition_matrix[prev_gt][
+                                curr_pred
                             ]
                             ce_loss[i] *= transition_penalty
+
+                        mean_ce_loss = ce_loss.mean()
+                        loss += mean_ce_loss
+                    elif self.prior_knowledge == "order":
+                        # Apply valid_mask to ignore gt class == 0
+                        ce_loss = (
+                            self.ce(
+                                p.transpose(2, 1)
+                                .contiguous()
+                                .view(-1, self.num_classes),
+                                batch_target.view(-1),
+                            )
+                            * valid_mask.view(-1).float()
+                        )
+                        predictions = torch.argmax(p, dim=1).cpu().numpy()
+                        for i in range(0, p.shape[2]):
+                            curr_gt = batch_target[0][i]
+                            curr_pred = predictions[0][i]
+                            order_penalty = self.transition_matrix[curr_gt][curr_pred]
+                            ce_loss[i] *= order_penalty
+
+                        mean_ce_loss = ce_loss.mean()
+                        loss += mean_ce_loss
+                    elif self.prior_knowledge == "transition_order":
+                        # Apply valid_mask to ignore gt class == 0
+                        ce_loss = (
+                            self.ce(
+                                p.transpose(2, 1)
+                                .contiguous()
+                                .view(-1, self.num_classes),
+                                batch_target.view(-1),
+                            )
+                            * valid_mask.view(-1).float()
+                        )
+                        predictions = torch.argmax(p, dim=1).cpu().numpy()
+                        for i in range(0, p.shape[2]):
+                            prev_gt = batch_target[0][i - 1]
+                            curr_gt = batch_target[0][i]
+                            curr_pred = predictions[0][i]
+                            transition_penalty = self.transition_matrix[prev_gt][
+                                curr_pred
+                            ]
+                            order_penalty = self.transition_matrix[curr_gt][curr_pred]
+                            ce_loss[i] *= transition_penalty * order_penalty
 
                         mean_ce_loss = ce_loss.mean()
                         loss += mean_ce_loss

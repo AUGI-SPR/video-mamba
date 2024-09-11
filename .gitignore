@@ -6,6 +6,8 @@ phakir*
 lovit*
 cholec80*
 reshaped*
-
+groundtruth
+videos
+mapping.txt
 __pycache__
 *.sh
