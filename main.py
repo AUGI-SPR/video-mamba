@@ -56,9 +56,9 @@ parser.add_argument("--stage", type=str, default="train")
 
 args = parser.parse_args()
 
-args.action = "train"
+# args.action = "train"
 args.dataset = "phakir"
-args.feature_extractor = "lovit_finetuned"
+# args.feature_extractor = "lovit_finetuned"
 args.causal = True
 args.mamba = False
 

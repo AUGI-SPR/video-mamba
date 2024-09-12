@@ -10,3 +10,4 @@ groundtruth
 videos
 mapping.txt
 __pycache__
+slurm*
