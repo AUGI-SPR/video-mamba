@@ -11,3 +11,4 @@ videos
 mapping.txt
 __pycache__
 *.sh
+slurm*
