@@ -53,6 +53,7 @@ parser.add_argument("--high_penalty", type=float, default=1.2)
 parser.add_argument("--prior_knowledge", type=str, default="order")
 parser.add_argument("--base", type=int, default=2)
 parser.add_argument("--stage", type=str, default="train")
+parser.add_argument("--train_with_mask", action="store_true")
 
 args = parser.parse_args()
 
@@ -160,7 +161,7 @@ if args.action == "train":
     )
     batch_gen_tst.read_data(vid_list_file_tst)
 
-    args.stage = "train"
+    args.stage = "train" if not args.train_with_mask else "test"
     trainer.train(
         model_dir,
         batch_gen,
