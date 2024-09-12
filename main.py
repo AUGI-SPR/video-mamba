@@ -17,31 +17,6 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 np.random.seed(seed)
 
-
-# Generate some random numbers to check if seeds are set
-print("Random number with random module: ", random.random())
-print("Random tensor with torch (CPU): ", torch.randn(1))
-if torch.cuda.is_available():
-    print("Random tensor with torch (CUDA): ", torch.randn(1).cuda())
-
-print("Random number with numpy: ", np.random.rand())
-
-# Reset seed and check for reproducibility
-random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-np.random.seed(seed)
-
-# Generate the same random numbers again
-print("\nAfter resetting seed:")
-print("Random number with random module: ", random.random())
-print("Random tensor with torch (CPU): ", torch.randn(1))
-if torch.cuda.is_available():
-    print("Random tensor with torch (CUDA): ", torch.randn(1).cuda())
-
-print("Random number with numpy: ", np.random.rand())
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 data_path = "/data2/local_datasets/"
@@ -57,10 +32,12 @@ parser.add_argument("--mamba", action="store_true")
 parser.add_argument("--causal", action="store_true")
 parser.add_argument("--drop_path_rate", type=float, default=0.1)  #
 parser.add_argument("--channel_mask_rate", type=float, default=0.3)  #
-parser.add_argument("--lr", type=float, default=0.0005)  #
+parser.add_argument(
+    "--lr", type=float, default=0.00005
+)  # ASFormer는 0.00005로 해야 잘됨
 parser.add_argument("--num_epochs", type=int, default=150)
 parser.add_argument("--num_decoders", type=int, default=3)  #
-parser.add_argument("--num_layers", type=int, default=8)  #
+parser.add_argument("--num_layers", type=int, default=10)  #
 parser.add_argument("--load_epoch", type=int, default=0)
 parser.add_argument("--encoder_only", action="store_true")
 parser.add_argument("--addstr", type=str, default="")
@@ -70,10 +47,12 @@ parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--sample_rate", type=int, default=1)  # 25
 parser.add_argument("--r1", type=int, default=2)  #
 parser.add_argument("--r2", type=int, default=2)  #
-parser.add_argument("--patience", type=int, default=15)  #
+parser.add_argument("--patience", type=int, default=20)  #
 parser.add_argument("--low_penalty", type=float, default=1)
-parser.add_argument("--high_penalty", type=float, default=2)
-parser.add_argument("--prior_knowledge", type=str, default="transition")
+parser.add_argument("--high_penalty", type=float, default=1.2)
+parser.add_argument("--prior_knowledge", type=str, default="order")
+parser.add_argument("--base", type=int, default=2)
+parser.add_argument("--stage", type=str, default="train")
 
 args = parser.parse_args()
 
@@ -81,7 +60,7 @@ args.action = "train"
 args.dataset = "phakir"
 args.feature_extractor = "lovit_finetuned"
 args.causal = True
-args.mamba = True
+args.mamba = False
 
 # args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
 args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d_d_%d" % (
@@ -121,7 +100,6 @@ r1 = args.r1
 r2 = args.r2
 patience = args.patience
 mamba = args.mamba
-
 
 vid_list_file = data_path + args.dataset + "/videos/train"
 vid_list_file_tst = data_path + args.dataset + "/videos/test"
@@ -182,14 +160,22 @@ if args.action == "train":
     )
     batch_gen_tst.read_data(vid_list_file_tst)
 
+    args.stage = "train"
     trainer.train(
-        model_dir, batch_gen, num_epochs, batch_size, lr, batch_gen_tst, patience
+        model_dir,
+        batch_gen,
+        num_epochs,
+        batch_size,
+        lr,
+        batch_gen_tst,
+        patience,
     )
     print("Finished training")
 
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
 
+    args.stage = "predict"
     trainer.predict(
         model_dir,
         result_dir,

@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "example",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/data/uwrgoy7584/repos/video-mamba-suite/video-mamba-suite/temporal-action-segmentation/main.py",
+            "console": "integratedTerminal",
+            "env": {
+                "HYDRA_FULL_ERROR": "1",
+                "TOKENIZERS_PARALLELISM": "false",
+                "CUDA_VISIBLE_DEVICES": "0"
+            },
+            "args": [ 
+                "--dataset", "phakir",
+                "--feature_extractor", "lovit_finetuned",
+                "--prior_knowledge", "order",
+                "--causal",
+                "--action", "train",
+                "--num_decoders", "3",
+                "--low_penalty", "1",
+                "--high_penalty", "3"
+            ],
+        }
+    ]
+}
