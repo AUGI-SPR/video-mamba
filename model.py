@@ -1008,6 +1008,37 @@ class Trainer:
 
                         mean_ce_loss = ce_loss.mean()
                         loss += mean_ce_loss
+                    elif self.prior_knowledge == "memory":
+                        ce_loss = (
+                            self.ce(
+                                p.transpose(2, 1)
+                                .contiguous()
+                                .view(-1, self.num_classes),
+                                batch_target.view(-1),
+                            )
+                            * valid_mask.view(-1).float()
+                        )
+                        predictions = torch.argmax(p, dim=1).cpu().numpy()
+                        for i in range(0, p.shape[2]):
+                            penalty_score = 0
+                            for j in range(self.args.memory_size):
+                                if i - j >= 0:
+                                    prev_gt = batch_target[0][i - j]
+                                    curr_pred = predictions[0][i]
+                                    if (
+                                        self.transition_matrix[prev_gt][curr_pred]
+                                        == self.args.high_penalty
+                                    ):
+                                        penalty_score += 1
+
+                            ce_loss[i] *= 1 + (
+                                self.args.high_penalty
+                                * penalty_score
+                                / self.args.memory_size
+                            )
+
+                        mean_ce_loss = ce_loss.mean()
+                        loss += mean_ce_loss
                     else:
                         ce_loss = (
                             self.ce(

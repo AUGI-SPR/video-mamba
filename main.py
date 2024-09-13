@@ -47,21 +47,23 @@ parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--sample_rate", type=int, default=1)  # 25
 parser.add_argument("--r1", type=int, default=2)  #
 parser.add_argument("--r2", type=int, default=2)  #
-parser.add_argument("--patience", type=int, default=20)  #
+parser.add_argument("--patience", type=int, default=35)  #
 parser.add_argument("--low_penalty", type=float, default=1)
-parser.add_argument("--high_penalty", type=float, default=1.2)
+parser.add_argument("--high_penalty", type=float, default=5)
 parser.add_argument("--prior_knowledge", type=str, default="order")
 parser.add_argument("--base", type=int, default=2)
 parser.add_argument("--stage", type=str, default="train")
 parser.add_argument("--train_with_mask", action="store_true")
+parser.add_argument("--memory_size", type=int, default=10)
 
 args = parser.parse_args()
 
-# args.action = "train"
+args.action = "train"
 args.dataset = "phakir"
-# args.feature_extractor = "lovit_finetuned"
+args.feature_extractor = "lovit_finetuned"
 args.causal = True
 args.mamba = False
+args.train_with_mask = False
 
 # args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
 args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d_d_%d" % (
