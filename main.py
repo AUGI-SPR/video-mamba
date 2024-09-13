@@ -191,6 +191,7 @@ if args.action == "train":
 
 if args.action == "predict":
 
+    args.stage = "test"
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
 
