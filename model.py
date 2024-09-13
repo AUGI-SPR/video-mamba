@@ -117,7 +117,7 @@ class AttLayer(nn.Module):
         if self.stage == "decoder":
             assert x2 is not None
             value = self.value_conv(x2)
-        else:
+        else:  # encoder는 self-attention이니까
             value = self.value_conv(x1)
 
         if self.att_type == "normal_att":
@@ -127,7 +127,7 @@ class AttLayer(nn.Module):
         elif self.att_type == "sliding_att":
             return self._sliding_window_self_att(query, key, value, mask)
         elif self.att_type == "causal_att":
-            return self._causal_self_att(query, key, value, mask)
+            return self._causal_att(query, key, value, mask)
 
     def _normal_self_att(self, q, k, v, mask):
         m_batchsize, c1, L = q.size()
@@ -299,7 +299,8 @@ class AttLayer(nn.Module):
         output = output[:, :, 0:L]
         return output * mask[:, 0:1, :]
 
-    def _causal_self_att(self, q, k, v, mask):
+    def _causal_att(self, q, k, v, mask):
+
         m_batchsize, c1, L = q.size()
         _, c2, L = k.size()
         _, c3, L = v.size()
@@ -349,7 +350,8 @@ class AttLayer(nn.Module):
             .reshape(m_batchsize * nb, c3, self.bl)
         )
         causal_mask = torch.tril(torch.ones((self.bl, self.bl))).unsqueeze(0).to(device)
-        padding_mask = padding_mask * causal_mask
+        # padding_mask = padding_mask * (1 if self.args.stage == "train" else causal_mask)
+        padding_mask = padding_mask * (1 if self.args.stage == "train" else causal_mask)
         output, attentions = self.att_helper.scalar_dot_att(q, k, v, padding_mask)
         output = self.conv_out(F.relu(output))
         output = (
@@ -434,8 +436,9 @@ class AttModule(nn.Module):
         self.alpha = alpha
 
     def forward(self, x, f, mask):
-        out = self.feed_forward(x)
-        out = self.alpha * self.att_layer(self.instance_norm(out), f, mask) + out
+        # out = self.feed_forward(x)
+        # out = self.alpha * self.att_layer(self.instance_norm(out), f, mask) + out
+        out = self.alpha * self.att_layer(x, f, mask) + x
         out = self.conv_1x1(out)
         out = self.dropout(out)
         return (x + out) * mask[:, 0:1, :]
@@ -616,7 +619,7 @@ class Decoder(nn.Module):
             self.layers = nn.ModuleList(
                 [
                     AttModule(
-                        2**i,
+                        2 * (args.base**i),
                         num_f_maps,
                         num_f_maps,
                         r1,
@@ -633,7 +636,7 @@ class Decoder(nn.Module):
             self.layers = nn.ModuleList(
                 [
                     AttModule_mamba(
-                        2**i,
+                        2 * (args.base**i),
                         num_f_maps,
                         num_f_maps,
                         r1,
@@ -704,6 +707,7 @@ class MyTransformer(nn.Module):
                             channel_masking_rate,
                             att_type="causal_att" if args.causal else "sliding_att",
                             alpha=exponential_descrease(s),
+                            drop_path_rate=drop_path_rate,
                             args=args,
                         )
                     )
@@ -721,8 +725,9 @@ class MyTransformer(nn.Module):
                             num_f_maps,
                             num_classes,
                             num_classes,
-                            att_type="sliding_att",
+                            att_type="causal_att" if args.causal else "sliding_att",
                             alpha=exponential_descrease(s),
+                            drop_path_rate=drop_path_rate,
                             args=args,
                         )
                     )
@@ -900,6 +905,7 @@ class Trainer:
         batch_gen_tst=None,
         patience=10,  # Adding a patience parameter for early stopping
     ):
+        self.args.stage = "train" if not self.args.train_with_mask else "test"
         self.model.train()
         self.model.to(device)
         optimizer = optim.Adam(
@@ -1003,8 +1009,8 @@ class Trainer:
 
                         mean_ce_loss = ce_loss.mean()
                         loss += mean_ce_loss
-                    else:
-                        loss += (
+                    elif self.prior_knowledge == "memory":
+                        ce_loss = (
                             self.ce(
                                 p.transpose(2, 1)
                                 .contiguous()
@@ -1012,7 +1018,39 @@ class Trainer:
                                 batch_target.view(-1),
                             )
                             * valid_mask.view(-1).float()
-                        )  # Apply mask to ignore gt == 0
+                        )
+                        predictions = torch.argmax(p, dim=1).cpu().numpy()
+                        for i in range(0, p.shape[2]):
+                            penalty_score = 0
+                            for j in range(self.args.memory_size):
+                                if i - j >= 0:
+                                    prev_gt = batch_target[0][i - j]
+                                    curr_pred = predictions[0][i]
+                                    if (
+                                        self.transition_matrix[prev_gt][curr_pred]
+                                        == self.args.high_penalty
+                                    ):
+                                        penalty_score += 1
+
+                            ce_loss[i] *= 1 + (
+                                self.args.high_penalty
+                                * penalty_score
+                                / self.args.memory_size
+                            )
+
+                        mean_ce_loss = ce_loss.mean()
+                        loss += mean_ce_loss
+                    else:
+                        ce_loss = (
+                            self.ce(
+                                p.transpose(2, 1)
+                                .contiguous()
+                                .view(-1, self.num_classes),
+                                batch_target.view(-1),
+                            )
+                            * valid_mask.view(-1).float()
+                        )
+                        loss += ce_loss.mean()
 
                     loss += 0.15 * torch.mean(
                         torch.clamp(
@@ -1052,6 +1090,7 @@ class Trainer:
                 )
             )
 
+            self.args.stage = "test"
             # Test accuracy 계산 시에도 동일한 방식으로 적용
             if batch_gen_tst is not None:
                 test_acc = self.test(batch_gen_tst, epoch)

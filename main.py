@@ -57,10 +57,10 @@ parser.add_argument("--mamba", action="store_true")
 parser.add_argument("--causal", action="store_true")
 parser.add_argument("--drop_path_rate", type=float, default=0.1)  #
 parser.add_argument("--channel_mask_rate", type=float, default=0.3)  #
-parser.add_argument("--lr", type=float, default=0.0005)  #
+parser.add_argument("--lr", type=float, default=0.0005)  # ASMamba는 0.0005로 해야 잘됨
 parser.add_argument("--num_epochs", type=int, default=150)
 parser.add_argument("--num_decoders", type=int, default=3)  #
-parser.add_argument("--num_layers", type=int, default=8)  #
+parser.add_argument("--num_layers", type=int, default=10)  #
 parser.add_argument("--load_epoch", type=int, default=0)
 parser.add_argument("--encoder_only", action="store_true")
 parser.add_argument("--addstr", type=str, default="")
@@ -70,10 +70,15 @@ parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--sample_rate", type=int, default=1)  # 25
 parser.add_argument("--r1", type=int, default=2)  #
 parser.add_argument("--r2", type=int, default=2)  #
-parser.add_argument("--patience", type=int, default=15)  #
+parser.add_argument("--patience", type=int, default=35)  #
 parser.add_argument("--low_penalty", type=float, default=1)
-parser.add_argument("--high_penalty", type=float, default=2)
-parser.add_argument("--prior_knowledge", type=str, default="transition")
+parser.add_argument("--high_penalty", type=float, default=5)
+parser.add_argument("--prior_knowledge", type=str, default="order")
+parser.add_argument("--base", type=int, default=2)
+parser.add_argument("--stage", type=str, default="train")
+parser.add_argument("--train_with_mask", action="store_true")
+parser.add_argument("--memory_size", type=int, default=10)
+
 
 args = parser.parse_args()
 
@@ -82,6 +87,7 @@ args.dataset = "phakir"
 args.feature_extractor = "lovit_finetuned"
 args.causal = True
 args.mamba = True
+args.train_with_mask = False
 
 # args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
 args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d_d_%d" % (
@@ -100,6 +106,7 @@ if (
     args.prior_knowledge == "transition"
     or args.prior_knowledge == "transition_order"
     or args.prior_knowledge == "order"
+    or args.prior_knowledge == "memory"
 ):
     args.addstr += "_%.2f_%.2f" % (args.low_penalty, args.high_penalty)
 
@@ -182,6 +189,8 @@ if args.action == "train":
     )
     batch_gen_tst.read_data(vid_list_file_tst)
 
+    args.stage = "train" if not args.train_with_mask else "test"
+
     trainer.train(
         model_dir, batch_gen, num_epochs, batch_size, lr, batch_gen_tst, patience
     )
@@ -190,6 +199,7 @@ if args.action == "train":
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
 
+    args.stage = "test"
     trainer.predict(
         model_dir,
         result_dir,
@@ -200,6 +210,7 @@ if args.action == "train":
 
 
 if args.action == "predict":
+    args.stage = "test"
 
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
