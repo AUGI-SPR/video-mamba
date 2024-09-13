@@ -5,17 +5,17 @@
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=20G
 #SBATCH -p batch_grad
-#SBATCH -w ariel-g2
+#SBATCH -w ariel-g3
 #SBATCH -t 3-0
 
 # Accept parameters for prior_knowledge, num_decoders, low_penalty, and high_penalty
-prior_knowledge=$1
-num_decoders=$2
-low_penalty=$3
-high_penalty=$4
+pk=$1
+nd=$2
+lp=$3
+hp=$4
 
 # Dynamically generate the output log file name
-output_file="logs/${SLURM_JOB_ID}_causal_asmamba_${prior_knowledge}_nd_${num_decoders}_lp_${low_penalty}_hp_${high_penalty}.out"
+output_file="logs/${SLURM_JOB_ID}_causal_asmamba_${pk}_nd_${nd}_lp_${lp}_hp_${hp}.out"
 
 # Redirect stdout and stderr to the dynamically generated file
 exec > $output_file 2>&1
@@ -25,5 +25,5 @@ source /data/uwrgoy7584/init.sh
 conda activate video-mamaba-suite
 
 # Execute the Python script with the given parameters
-python main.py --dataset phakir --feature_extractor lovit_finetuned --prior_knowledge ${prior_knowledge} --causal --mamba --action train --num_decoders ${num_decoders} --low_penalty ${low_penalty} --high_penalty ${high_penalty} --patience 45
-# python main.py --dataset phakir --feature_extractor lovit_finetuned --prior_knowledge order --causal --mamba --action train --num_decoders 3 --low_penalty 1 --high_penalty 2 --patience 45
+python main.py --feature_extractor lovit_finetuned_video01 --prior_knowledge ${pk} --num_decoders ${nd} --low_penalty ${lp} --high_penalty ${hp} --dataset phakir --causal --mamba --action train --patience 20 
+# python main.py --feature_extractor lovit_finetuned_video04 --prior_knowledge order --num_decoders 3 --low_penalty 1 --high_penalty 2 --dataset phakir --causal --mamba --action train --patience 20

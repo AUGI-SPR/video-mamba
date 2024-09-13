@@ -35,7 +35,7 @@ parser.add_argument("--channel_mask_rate", type=float, default=0.3)  #
 parser.add_argument("--lr", type=float, default=0.0005)  # ASMamba는 0.0005로 해야 잘됨
 parser.add_argument("--num_epochs", type=int, default=150)
 parser.add_argument("--num_decoders", type=int, default=3)  #
-parser.add_argument("--num_layers", type=int, default=10)  #
+parser.add_argument("--num_layers", type=int, default=8)  #
 parser.add_argument("--load_epoch", type=int, default=0)
 parser.add_argument("--encoder_only", action="store_true")
 parser.add_argument("--addstr", type=str, default="")
@@ -59,7 +59,6 @@ args = parser.parse_args()
 
 args.action = "train"
 args.dataset = "phakir"
-args.feature_extractor = "lovit_finetuned"
 args.causal = True
 args.mamba = True
 args.train_with_mask = False
