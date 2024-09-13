@@ -1232,7 +1232,6 @@ class Trainer:
                     ((predicted == batch_target).float() * valid_mask).sum().item()
                 )
                 total_predictions_batch = valid_mask.sum().item()
-
                 # Avoid division by zero when there are no valid predictions
                 if total_predictions_batch > 0:
                     accuracy_batch = correct_predictions_batch / total_predictions_batch
@@ -1252,6 +1251,16 @@ class Trainer:
                     + vid.split(".")[0]
                     + f"_{epoch}_{accuracy_batch * 100:.2f}.png"
                 )
+                predicted = predicted.cpu()  # Move the tensor to CPU if it's on GPU
+                predicted_np = (
+                    predicted.numpy().flatten()
+                )  # Convert to numpy array and flatten to 1D
+
+                # Save each element in a new line
+                with open(f"{save_path}.txt", "w") as f:
+                    for item in predicted_np:
+                        f.write(f"{item}\n")
+
                 self.plot_phase_recognition(
                     save_path, predicted.cpu().numpy(), batch_target.cpu().numpy()
                 )
