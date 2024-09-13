@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=20G
 #SBATCH -p batch_grad
-#SBATCH -w ariel-g1
+#SBATCH -w ariel-g2
 #SBATCH -t 3-0
 
 # Accept parameters for prior_knowledge, num_decoders, low_penalty, and high_penalty

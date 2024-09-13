@@ -300,6 +300,7 @@ class AttLayer(nn.Module):
         return output * mask[:, 0:1, :]
 
     def _causal_att(self, q, k, v, mask):
+
         m_batchsize, c1, L = q.size()
         _, c2, L = k.size()
         _, c3, L = v.size()

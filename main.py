@@ -63,7 +63,7 @@ args.dataset = "phakir"
 args.feature_extractor = "lovit_finetuned"
 args.causal = True
 args.mamba = False
-args.train_with_mask = True
+args.train_with_mask = False
 
 # args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
 args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d_d_%d" % (
@@ -82,6 +82,7 @@ if (
     args.prior_knowledge == "transition"
     or args.prior_knowledge == "transition_order"
     or args.prior_knowledge == "order"
+    or args.prior_knowledge == "memory"
 ):
     args.addstr += "_%.2f_%.2f" % (args.low_penalty, args.high_penalty)
 
@@ -178,7 +179,7 @@ if args.action == "train":
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
 
-    args.stage = "predict"
+    args.stage = "test"
     trainer.predict(
         model_dir,
         result_dir,
