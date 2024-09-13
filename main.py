@@ -17,31 +17,6 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 np.random.seed(seed)
 
-
-# Generate some random numbers to check if seeds are set
-print("Random number with random module: ", random.random())
-print("Random tensor with torch (CPU): ", torch.randn(1))
-if torch.cuda.is_available():
-    print("Random tensor with torch (CUDA): ", torch.randn(1).cuda())
-
-print("Random number with numpy: ", np.random.rand())
-
-# Reset seed and check for reproducibility
-random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-np.random.seed(seed)
-
-# Generate the same random numbers again
-print("\nAfter resetting seed:")
-print("Random number with random module: ", random.random())
-print("Random tensor with torch (CPU): ", torch.randn(1))
-if torch.cuda.is_available():
-    print("Random tensor with torch (CUDA): ", torch.randn(1).cuda())
-
-print("Random number with numpy: ", np.random.rand())
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 data_path = "/data2/local_datasets/"
