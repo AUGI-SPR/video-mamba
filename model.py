@@ -904,7 +904,7 @@ class Trainer:
         batch_gen_tst=None,
         patience=10,  # Adding a patience parameter for early stopping
     ):
-        self.args.stage = "test"
+        self.args.stage = "train" if not self.args.train_with_mask else "test"
         self.model.train()
         self.model.to(device)
         optimizer = optim.Adam(

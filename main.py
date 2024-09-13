@@ -63,7 +63,7 @@ args.dataset = "phakir"
 args.feature_extractor = "lovit_finetuned"
 args.causal = True
 args.mamba = False
-args.train_with_mask = False
+args.train_with_mask = True
 
 # args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d" % (
 args.addstr = "dp%.2f_l%d_m%.2f_lr%.4f_fm%d_r1%d_r2%d_p_%d_d_%d" % (
